@@ -260,3 +260,7 @@ GuardNet AI follows a **7-step pipeline** for real-time threat detection in 5G/6
 | **Testing** | Pytest, Locust | 7.0+, 2.0+ |
 
 ---
+
+## 📄 License
+
+This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) file for details.
