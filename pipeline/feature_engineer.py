@@ -8,6 +8,23 @@ from kafka import KafkaConsumer, KafkaProducer
 import threading
 import queue
 
+# ====== FIX: Convert numpy types to Python types ======
+def convert_to_serializable(obj):
+    """Convert numpy types to Python types for JSON serialization"""
+    if isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, dict):
+        return {k: convert_to_serializable(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_to_serializable(item) for item in obj]
+    else:
+        return obj
+# ======================================================
+
 class FeatureEngineer:
     def __init__(self, window_size=10):
         """
@@ -52,37 +69,37 @@ class FeatureEngineer:
                 'slice_type': slice_type,
                 'window_start': self.last_window_time.isoformat(),
                 'window_end': datetime.now().isoformat(),
-                'flow_count': len(slice_df),
-                'total_packets': slice_df['packet_count'].sum(),
-                'total_bytes': slice_df['byte_count'].sum(),
-                'avg_duration': slice_df['duration'].mean(),
-                'std_duration': slice_df['duration'].std() if len(slice_df) > 1 else 0,
-                'packet_rate': slice_df['packet_count'].sum() / self.window_size,
-                'byte_rate': slice_df['byte_count'].sum() / self.window_size,
-                'unique_ues': slice_df['ue_ip'].nunique(),
-                'unique_nfs': slice_df['nf_type'].nunique(),
-                'avg_qci': slice_df['qci'].mean(),
-                'malicious_count': slice_df[slice_df.get('is_malicious', False) == True].shape[0],
-                'protocol_tcp_ratio': (slice_df['protocol'] == 'TCP').mean(),
-                'protocol_udp_ratio': (slice_df['protocol'] == 'UDP').mean(),
-                'protocol_icmp_ratio': (slice_df['protocol'] == 'ICMP').mean(),
+                'flow_count': int(len(slice_df)),
+                'total_packets': int(slice_df['packet_count'].sum()),
+                'total_bytes': int(slice_df['byte_count'].sum()),
+                'avg_duration': float(slice_df['duration'].mean()),
+                'std_duration': float(slice_df['duration'].std()) if len(slice_df) > 1 else 0.0,
+                'packet_rate': float(slice_df['packet_count'].sum() / self.window_size),
+                'byte_rate': float(slice_df['byte_count'].sum() / self.window_size),
+                'unique_ues': int(slice_df['ue_ip'].nunique()),
+                'unique_nfs': int(slice_df['nf_type'].nunique()),
+                'avg_qci': float(slice_df['qci'].mean()),
+                'malicious_count': int(slice_df[slice_df.get('is_malicious', False) == True].shape[0]),
+                'protocol_tcp_ratio': float((slice_df['protocol'] == 'TCP').mean()),
+                'protocol_udp_ratio': float((slice_df['protocol'] == 'UDP').mean()),
+                'protocol_icmp_ratio': float((slice_df['protocol'] == 'ICMP').mean()),
             }
             
             # Add per-slice traffic patterns
             if slice_type == 'URLLC':
                 slice_features['latency_sensitive'] = 1
-                slice_features['throughput_gbps'] = slice_features['byte_rate'] / 1e9
+                slice_features['throughput_gbps'] = float(slice_features['byte_rate'] / 1e9)
             elif slice_type == 'eMBB':
-                slice_features['throughput_mbps'] = slice_features['byte_rate'] / 1e6
-                slice_features['large_packet_ratio'] = (slice_df['packet_count'] > 1000).mean()
+                slice_features['throughput_mbps'] = float(slice_features['byte_rate'] / 1e6)
+                slice_features['large_packet_ratio'] = float((slice_df['packet_count'] > 1000).mean())
             elif slice_type == 'mMTC':
-                slice_features['device_density'] = slice_features['unique_ues'] / self.window_size
-                slice_features['small_packet_ratio'] = (slice_df['packet_count'] < 10).mean()
+                slice_features['device_density'] = float(slice_features['unique_ues'] / self.window_size)
+                slice_features['small_packet_ratio'] = float((slice_df['packet_count'] < 10).mean())
             
             # Normalize features (Z-score approximation)
             for key in ['flow_count', 'total_packets', 'total_bytes', 'packet_rate', 'byte_rate']:
                 if key in slice_features:
-                    slice_features[f'{key}_norm'] = slice_features[key] / (slice_features[key] + 1)
+                    slice_features[f'{key}_norm'] = float(slice_features[key] / (slice_features[key] + 1))
             
             features[f'slice_{slice_type}'] = slice_features
         
@@ -110,8 +127,9 @@ class FeatureEngineer:
                         features = self.extract_features_from_window(self.flow_buffer)
                         
                         if features:
-                            # Send features to Kafka
-                            self.producer.send('featured-flows', value=features)
+                            # FIX: Convert numpy types to Python types
+                            features_serializable = convert_to_serializable(features)
+                            self.producer.send('featured-flows', value=features_serializable)
                             
                             # Print sample features
                             for slice_name, slice_features in features.items():

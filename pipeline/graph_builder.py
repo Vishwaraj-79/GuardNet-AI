@@ -10,9 +10,6 @@ import pickle
 
 class GraphBuilder:
     def __init__(self, window_size=10):
-        """
-        window_size: seconds to build graph from
-        """
         self.window_size = window_size
         self.flow_buffer = []
         self.graph_queue = []
@@ -67,7 +64,7 @@ class GraphBuilder:
             unique_ues = slice_data.get('unique_ues', 0)
             
             # Generate sample UEs based on unique count
-            for i in range(min(unique_ues, 10)):  # Limit to 10 UEs per slice
+            for i in range(min(unique_ues, 10)):
                 ue_id = f'ue_{slice_data["slice_type"]}_{i}'
                 G.add_node(ue_id, type='UE', slice=slice_data['slice_type'])
                 self.ue_list.add(ue_id)
@@ -81,10 +78,6 @@ class GraphBuilder:
                     G.add_edge(ue_id, 'nf_UPF', relation='communicates', weight=0.6)
                 if slice_data.get('protocol_udp_ratio', 0) > 0.3:
                     G.add_edge(ue_id, 'nf_AMF', relation='communicates', weight=0.4)
-                
-                # Add edge features
-                G[ue_id][f'slice_{slice_data["slice_type"]}']['weight'] = 0.8
-                G[ue_id][f'slice_{slice_data["slice_type"]}']['packet_rate'] = slice_data.get('packet_rate', 10)
         
         # Connect NFs to Slices
         for slice_name in node_types['Slice']:
@@ -98,12 +91,10 @@ class GraphBuilder:
             node_data = G.nodes[node]
             node_type = node_data.get('type', 'Unknown')
             
-            # Set feature vectors based on node type
             if node_type == 'Slice':
                 slice_type = node_data.get('slice_type', '')
                 if slice_type in features:
                     f = features[slice_type]
-                    # Feature vector for slice node
                     features_vec = np.array([
                         f.get('flow_count', 0) / 100,
                         f.get('packet_rate', 0) / 1000,
@@ -118,28 +109,22 @@ class GraphBuilder:
                     G.nodes[node]['features'] = features_vec.tolist()
             
             elif node_type == 'UE':
-                # Simple feature vector for UE
                 features_vec = np.array([
-                    np.random.uniform(0, 1),  # Activity level
-                    np.random.uniform(0, 1),  # Data usage
-                    np.random.uniform(0, 1),  # Mobility
-                    np.random.uniform(0, 1)   # Security risk
+                    np.random.uniform(0, 1),
+                    np.random.uniform(0, 1),
+                    np.random.uniform(0, 1),
+                    np.random.uniform(0, 1)
                 ])
                 G.nodes[node]['features'] = features_vec.tolist()
             
             elif node_type == 'NF':
-                # Feature vector for NF
                 features_vec = np.array([
-                    np.random.uniform(0.3, 0.9),  # Load
-                    np.random.uniform(0.1, 0.8),  # Latency
-                    np.random.uniform(0.5, 1.0),  # Availability
-                    np.random.uniform(0, 0.3)     # Error rate
+                    np.random.uniform(0.3, 0.9),
+                    np.random.uniform(0.1, 0.8),
+                    np.random.uniform(0.5, 1.0),
+                    np.random.uniform(0, 0.3)
                 ])
                 G.nodes[node]['features'] = features_vec.tolist()
-        
-        # Add edge features (weights already added)
-        for u, v, data in G.edges(data=True):
-            data['weight'] = data.get('weight', np.random.uniform(0.3, 0.8))
         
         return G
     
@@ -156,41 +141,42 @@ class GraphBuilder:
                 features = message.value
                 current_time = datetime.now()
                 
-                # Add features to buffer
                 buffer.append(features)
                 
-                # Check if window is complete
                 if (current_time - self.last_window_time).total_seconds() >= self.window_size:
                     if buffer:
-                        # Build graph from accumulated features
-                        G = self.build_heterogeneous_graph(features)
-                        self.graph_counter += 1
-                        
-                        # Store graph metadata
-                        graph_info = {
-                            'graph_id': self.graph_counter,
-                            'timestamp': current_time.isoformat(),
-                            'nodes': G.number_of_nodes(),
-                            'edges': G.number_of_edges(),
-                            'graph_data': G
-                        }
-                        
-                        # Send to Kafka
-                        self.producer.send('graphs', value=graph_info)
-                        
-                        # Print summary
-                        print(f"📊 Graph #{self.graph_counter}: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
-                        print(f"   Slices: {list(self.slice_list)[:3]}...")
-                        print(f"   UEs: {list(self.ue_list)[:3]}...")
-                        
-                        # Store in queue for later use
-                        self.graph_queue.append(graph_info)
-                        if len(self.graph_queue) > 100:
-                            self.graph_queue.pop(0)
-                        
-                        # Reset buffer
-                        buffer = []
-                        self.last_window_time = current_time
+                        try:
+                            # Build graph from accumulated features
+                            G = self.build_heterogeneous_graph(features)
+                            self.graph_counter += 1
+                            
+                            # Store graph metadata
+                            graph_info = {
+                                'graph_id': self.graph_counter,
+                                'timestamp': current_time.isoformat(),
+                                'nodes': G.number_of_nodes(),
+                                'edges': G.number_of_edges(),
+                                'graph_data': G
+                            }
+                            
+                            # Send to Kafka
+                            self.producer.send('graphs', value=graph_info)
+                            
+                            # Print summary
+                            print(f"📊 Graph #{self.graph_counter}: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges")
+                            print(f"   Slices: {list(self.slice_list)[:3]}...")
+                            print(f"   UEs: {list(self.ue_list)[:3]}...")
+                            
+                            self.graph_queue.append(graph_info)
+                            if len(self.graph_queue) > 100:
+                                self.graph_queue.pop(0)
+                            
+                            buffer = []
+                            self.last_window_time = current_time
+                            
+                        except Exception as e:
+                            print(f"⚠️ Error building graph: {e}")
+                            continue
                     
         except KeyboardInterrupt:
             print("\n🔴 Stopping graph builder...")
@@ -200,17 +186,14 @@ class GraphBuilder:
             self.running = False
     
     def get_latest_graph(self):
-        """Get most recent graph"""
         if self.graph_queue:
             return self.graph_queue[-1]['graph_data']
         return None
     
     def get_graph_count(self):
-        """Get number of graphs built"""
         return self.graph_counter
     
     def run(self):
-        """Start the graph builder"""
         self.process_stream()
 
 if __name__ == "__main__":
